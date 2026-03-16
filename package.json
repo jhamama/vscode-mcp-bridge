@@ -1,0 +1,95 @@
+{
+  "name": "vscode-mcp-bridge",
+  "displayName": "VS Code MCP Bridge",
+  "description": "Bridges VS Code IDE features to AI coding agents via MCP",
+  "version": "0.1.0",
+  "publisher": "jhamama",
+  "private": true,
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhamama/vscode-mcp-server"
+  },
+  "categories": ["Other"],
+  "keywords": ["mcp", "ai", "agent", "lsp", "diagnostics"],
+  "icon": "icon.png",
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "MCP Server",
+      "properties": {
+        "mcpServer.port": {
+          "type": "number",
+          "default": 3333,
+          "description": "HTTP port for the MCP server"
+        },
+        "mcpServer.enableContextPush": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically push context updates (active file, selection, diagnostics) to connected agents"
+        },
+        "mcpServer.authToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token required for HTTP connections (empty = no auth)"
+        },
+        "mcpServer.allowedCommands": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "VS Code commands allowed via execute_vscode_command tool (empty = none allowed)"
+        },
+        "mcpServer.terminalStrategy": {
+          "type": "string",
+          "enum": ["childProcess", "shellIntegration"],
+          "default": "childProcess",
+          "description": "How to run terminal commands. childProcess captures output reliably. shellIntegration shows in VS Code terminal (requires VS Code 1.93+)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "mcpServer.start",
+        "title": "VS Code MCP Bridge: Start Server"
+      },
+      {
+        "command": "mcpServer.stop",
+        "title": "VS Code MCP Bridge: Stop Server"
+      },
+      {
+        "command": "mcpServer.restart",
+        "title": "VS Code MCP Bridge: Restart Server"
+      },
+      {
+        "command": "mcpServer.copyConnectionUrl",
+        "title": "VS Code MCP Bridge: Copy Connection URL"
+      },
+      {
+        "command": "mcpServer.showStatus",
+        "title": "VS Code MCP Bridge: Show Status / Options"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build:prod",
+    "build": "node esbuild.config.js",
+    "build:prod": "node esbuild.config.js --production",
+    "watch": "node esbuild.config.js --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.93.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}
