@@ -1,187 +1,132 @@
 import * as vscode from 'vscode'
-import { spawn, type ChildProcess } from 'child_process'
+import * as fs from 'fs'
 import * as os from 'os'
+import * as path from 'path'
 import { log } from '../utils/logger.js'
 
-const MAX_BUFFER_SIZE = 128 * 1024 // 128 KB per terminal
-
-// Try to load node-pty for full interactive terminal support
-let pty: typeof import('node-pty') | null = null
-try {
-  pty = require('node-pty')
-  log.info('Terminal', 'node-pty loaded successfully')
-} catch (err) {
-  log.info('Terminal', 'node-pty not available, using child_process fallback', (err as Error).message)
-}
+const MAX_READ_SIZE = 128 * 1024 // Read last 128 KB from log file
 
 interface ManagedTerminal {
   id: string
   name: string
-  process: ChildProcess | import('node-pty').IPty
   terminal: vscode.Terminal
-  writeEmitter: vscode.EventEmitter<string>
+  logFile: string
   cwd: string
   createdAt: number
-  outputBuffer: string
   alive: boolean
-  usePty: boolean
+  disposeListener: vscode.Disposable
 }
 
 export class TerminalManager {
   private terminals = new Map<string, ManagedTerminal>()
   private nextId = 1
+  private logDir: string
 
-  get hasPty(): boolean {
-    return pty !== null
+  constructor() {
+    this.logDir = path.join(os.tmpdir(), 'vscode-mcp-terminals')
+    fs.mkdirSync(this.logDir, { recursive: true })
+    this.cleanupStaleLogFiles()
+  }
+
+  private cleanupStaleLogFiles(): void {
+    try {
+      const files = fs.readdirSync(this.logDir)
+      for (const file of files) {
+        const filePath = path.join(this.logDir, file)
+        fs.unlinkSync(filePath)
+        log.debug('Terminal', `Cleaned up stale log file: ${file}`)
+      }
+      if (files.length > 0) {
+        log.info('Terminal', `Cleaned up ${files.length} stale log file(s) from previous session`)
+      }
+    } catch {
+      // Ignore errors during cleanup
+    }
   }
 
   dispose(): void {
     for (const [, t] of this.terminals) {
-      this.killProcess(t)
-      t.writeEmitter.dispose()
+      t.disposeListener.dispose()
+      t.terminal.dispose()
+      this.cleanupLogFile(t.logFile)
     }
     this.terminals.clear()
   }
 
-  spawn(name: string, command?: string, cwd?: string): { id: string; name: string; pid: number | undefined; mode: string } {
+  spawn(name: string, command?: string, cwd?: string): { id: string; name: string } {
     const id = `term_${this.nextId++}`
     const workingDir = cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()
-    const shell = process.env.SHELL || (os.platform() === 'win32' ? 'cmd.exe' : '/bin/sh')
+    const logFile = path.join(this.logDir, `${id}.log`)
+    const displayName = name || `Task ${id}`
 
-    const writeEmitter = new vscode.EventEmitter<string>()
-    const closeEmitter = new vscode.EventEmitter<number | void>()
+    // Launch script directly as the terminal shell so setup is invisible
+    const isLinux = os.platform() === 'linux'
+    const shell = process.env.SHELL || '/bin/zsh'
 
-    const ptyHandler: vscode.Pseudoterminal = {
-      onDidWrite: writeEmitter.event,
-      onDidClose: closeEmitter.event,
-      open: () => {},
-      close: () => {
-        this.kill(id)
-      },
-      handleInput: (data: string) => {
-        const managed = this.terminals.get(id)
-        if (!managed?.alive) return
-        if (managed.usePty) {
-          (managed.process as import('node-pty').IPty).write(data)
-        } else {
-          (managed.process as ChildProcess).stdin?.write(data)
-        }
-      },
-    }
+    // Use bash -c to set up trap and run script, which spawns the user's shell
+    const setupCmd = isLinux
+      ? `trap 'rm -f "${logFile}"' EXIT HUP TERM; script -q -f "${logFile}" -c "${shell}"`
+      : `trap 'rm -f "${logFile}"' EXIT HUP TERM; script -q -F "${logFile}" "${shell}"`
 
-    const terminal = vscode.window.createTerminal({ name: name || `Task ${id}`, pty: ptyHandler })
+    const terminal = vscode.window.createTerminal({
+      name: displayName,
+      cwd: workingDir,
+      shellPath: '/bin/bash',
+      shellArgs: ['-c', setupCmd],
+    })
     terminal.show(true)
 
-    let proc: ChildProcess | import('node-pty').IPty | null = null
-    let usePty = false
+    // If a command was provided, send it after script initializes
+    if (command) {
+      setTimeout(() => {
+        terminal.sendText(command, true)
+      }, 500)
+    }
 
-    if (pty) {
-      // node-pty available — try full interactive terminal
-      try {
-        const args = command ? ['-c', command] : []
-        log.debug('Terminal', `Attempting node-pty spawn: ${shell} ${args.join(' ')}`, { cwd: workingDir })
-        proc = pty.spawn(shell, args, {
-          cwd: workingDir,
-          env: process.env as Record<string, string>,
-          cols: 120,
-          rows: 30,
-        })
-        usePty = true
-        log.info('Terminal', `Spawned via node-pty: ${id} (pid: ${proc.pid})`)
-      } catch (err) {
-        log.warn('Terminal', `node-pty spawn failed, falling back to child_process`, (err as Error).message)
+    // Listen for terminal close
+    const disposeListener = vscode.window.onDidCloseTerminal((closed) => {
+      if (closed === terminal) {
+        const managed = this.terminals.get(id)
+        if (managed) {
+          managed.alive = false
+          log.info('Terminal', `Terminal closed: ${id}`)
+          this.cleanupLogFile(managed.logFile)
+        }
       }
-    }
-
-    if (!proc) {
-      // Fallback to child_process
-      const spawnArgs: [string, string[]] = command
-        ? [shell, ['-c', command]]
-        : [shell, []]
-      log.debug('Terminal', `Spawning via child_process: ${spawnArgs[0]} ${spawnArgs[1].join(' ')}`, { cwd: workingDir })
-      proc = spawn(spawnArgs[0], spawnArgs[1], {
-        cwd: workingDir,
-        env: { ...process.env, TERM: 'xterm-256color' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      log.info('Terminal', `Spawned via child_process: ${id} (pid: ${proc.pid})`)
-    }
+    })
 
     const managed: ManagedTerminal = {
       id,
-      name: name || `Task ${id}`,
-      process: proc,
+      name: displayName,
       terminal,
-      writeEmitter,
+      logFile,
       cwd: workingDir,
       createdAt: Date.now(),
-      outputBuffer: '',
       alive: true,
-      usePty,
+      disposeListener,
     }
 
     this.terminals.set(id, managed)
+    log.info('Terminal', `Spawned terminal: ${id} (log: ${logFile})`)
 
-    if (usePty) {
-      const ptyProc = proc as import('node-pty').IPty
-      ptyProc.onData((data: string) => {
-        this.appendOutput(managed, data)
-        writeEmitter.fire(data)
-      })
-      ptyProc.onExit(({ exitCode }: { exitCode: number }) => {
-        managed.alive = false
-        log.info('Terminal', `Process exited: ${id} (code: ${exitCode})`)
-        writeEmitter.fire(`\r\n[Process exited with code ${exitCode}]\r\n`)
-        closeEmitter.fire(exitCode)
-      })
-    } else {
-      const cpProc = proc as ChildProcess
-      cpProc.stdout?.on('data', (chunk: Buffer) => {
-        const text = chunk.toString()
-        this.appendOutput(managed, text)
-        writeEmitter.fire(text.replace(/\n/g, '\r\n'))
-      })
-      cpProc.stderr?.on('data', (chunk: Buffer) => {
-        const text = chunk.toString()
-        this.appendOutput(managed, text)
-        writeEmitter.fire(text.replace(/\n/g, '\r\n'))
-      })
-      cpProc.on('exit', (code) => {
-        managed.alive = false
-        log.info('Terminal', `Process exited: ${id} (code: ${code})`)
-        writeEmitter.fire(`\r\n[Process exited with code ${code}]\r\n`)
-        closeEmitter.fire(code ?? undefined)
-      })
-      cpProc.on('error', (err) => {
-        managed.alive = false
-        log.error('Terminal', `Process error: ${id}`, err.message)
-        writeEmitter.fire(`\r\n[Process error: ${err.message}]\r\n`)
-        closeEmitter.fire(1)
-      })
-    }
-
-    return { id, name: managed.name, pid: proc.pid, mode: usePty ? 'pty' : 'pipe' }
+    return { id, name: displayName }
   }
 
   list(): Array<{
     id: string
     name: string
-    pid: number | undefined
     alive: boolean
     cwd: string
     createdAt: number
-    bufferSize: number
-    mode: string
+    logSize: number
   }> {
     return Array.from(this.terminals.values()).map(t => ({
       id: t.id,
       name: t.name,
-      pid: t.process.pid,
       alive: t.alive,
       cwd: t.cwd,
       createdAt: t.createdAt,
-      bufferSize: t.outputBuffer.length,
-      mode: t.usePty ? 'pty' : 'pipe',
+      logSize: this.getLogSize(t.logFile),
     }))
   }
 
@@ -189,27 +134,41 @@ export class TerminalManager {
     const managed = this.terminals.get(id)
     if (!managed) return null
 
-    let output = managed.outputBuffer
-    if (lines !== undefined && lines > 0) {
-      const allLines = output.split('\n')
-      output = allLines.slice(-lines).join('\n')
+    let output = ''
+    let totalBytes = 0
+
+    try {
+      const stats = fs.statSync(managed.logFile)
+      totalBytes = stats.size
+
+      if (totalBytes === 0) {
+        return { output: '', alive: managed.alive, totalBytes: 0 }
+      }
+
+      // Read the last MAX_READ_SIZE bytes
+      const readSize = Math.min(totalBytes, MAX_READ_SIZE)
+      const buffer = Buffer.alloc(readSize)
+      const fd = fs.openSync(managed.logFile, 'r')
+      fs.readSync(fd, buffer, 0, readSize, totalBytes - readSize)
+      fs.closeSync(fd)
+
+      output = this.stripAnsi(buffer.toString('utf-8'))
+
+      if (lines !== undefined && lines > 0) {
+        const allLines = output.split('\n')
+        output = allLines.slice(-lines).join('\n')
+      }
+    } catch (err) {
+      log.debug('Terminal', `Could not read log for ${id}`, (err as Error).message)
     }
 
-    return {
-      output,
-      alive: managed.alive,
-      totalBytes: managed.outputBuffer.length,
-    }
+    return { output, alive: managed.alive, totalBytes }
   }
 
-  write(id: string, input: string): boolean {
+  write(id: string, input: string, addNewline = true): boolean {
     const managed = this.terminals.get(id)
     if (!managed || !managed.alive) return false
-    if (managed.usePty) {
-      (managed.process as import('node-pty').IPty).write(input)
-    } else {
-      (managed.process as ChildProcess).stdin?.write(input)
-    }
+    managed.terminal.sendText(input, addNewline)
     return true
   }
 
@@ -217,27 +176,44 @@ export class TerminalManager {
     const managed = this.terminals.get(id)
     if (!managed) return false
 
+    log.info('Terminal', `Killing terminal: ${id}`)
+
+    // Send exit to the script session, then dispose the terminal
     if (managed.alive) {
-      log.info('Terminal', `Killing terminal: ${id} (signal: ${signal})`)
-      this.killProcess(managed, signal)
+      managed.terminal.sendText('exit', true)
+      // Give script a moment to clean up, then force dispose
+      setTimeout(() => {
+        managed.terminal.dispose()
+        this.cleanupLogFile(managed.logFile)
+      }, 1000)
       managed.alive = false
     }
+
+    managed.disposeListener.dispose()
     this.terminals.delete(id)
     return true
   }
 
-  private killProcess(managed: ManagedTerminal, signal: NodeJS.Signals = 'SIGTERM'): void {
-    if (managed.usePty) {
-      (managed.process as import('node-pty').IPty).kill(signal)
-    } else {
-      (managed.process as ChildProcess).kill(signal)
+  private getLogSize(logFile: string): number {
+    try {
+      return fs.statSync(logFile).size
+    } catch {
+      return 0
     }
   }
 
-  private appendOutput(managed: ManagedTerminal, text: string): void {
-    managed.outputBuffer += text
-    if (managed.outputBuffer.length > MAX_BUFFER_SIZE) {
-      managed.outputBuffer = managed.outputBuffer.slice(-MAX_BUFFER_SIZE)
+  private cleanupLogFile(logFile: string): void {
+    try {
+      fs.unlinkSync(logFile)
+      log.debug('Terminal', `Cleaned up log file: ${logFile}`)
+    } catch {
+      // File may already be cleaned up by trap
     }
+  }
+
+  // Strip ANSI escape sequences and control characters from terminal output
+  private stripAnsi(text: string): string {
+    // eslint-disable-next-line no-control-regex
+    return text.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>]|\x08.|\r/g, '')
   }
 }

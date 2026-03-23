@@ -41,7 +41,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Terminal manager for long-running processes
   terminalManager = new TerminalManager()
-  log.info('Extension', `Terminal manager initialized (node-pty: ${terminalManager.hasPty ? 'available' : 'not available, using pipe fallback'})`)
+  log.info('Extension', 'Terminal manager initialized')
 
   // Start HTTP server
   httpServer = new HttpServer(bridge, contextPusher, settings, terminalManager)

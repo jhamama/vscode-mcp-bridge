@@ -7,7 +7,7 @@ const buildOptions = {
   entryPoints: ['src/extension.ts'],
   bundle: true,
   outfile: 'out/extension.js',
-  external: ['vscode', 'node-pty'], // vscode provided by runtime, node-pty is native
+  external: ['vscode'], // Must be external - provided by VS Code runtime
   format: 'cjs',        // Must be cjs - VS Code extension host requires CommonJS
   platform: 'node',
   target: 'node20',

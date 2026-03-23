@@ -145,7 +145,7 @@ LONG-RUNNING PROCESSES:
 - list_terminals shows all managed terminals and whether they are still alive.
 - read_terminal lets you check on output later. You can request the last N lines to avoid reading the entire buffer.
 - write_terminal sends input to a running process (e.g. answer a prompt, type a command).
-- kill_terminal stops a process. Prefer SIGTERM; use SIGINT for graceful shutdown of servers, SIGKILL as a last resort.
+- kill_terminal stops a process and cleans up.
 - Note: run_terminal_command will timeout on long-running processes — use spawn_terminal instead.
 
 GENERAL:

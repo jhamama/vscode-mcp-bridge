@@ -1,6 +1,5 @@
 src/**
 node_modules/**
-!node_modules/node-pty/**
 .eslintrc.json
 tsconfig.json
 esbuild.config.js

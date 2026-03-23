@@ -39,7 +39,7 @@ function logged<T, R>(toolName: string, handler: (args: T) => Promise<R>): (args
 }
 
 export function registerTools(server: McpServer, bridge: VsCodeBridge, settings: Settings, terminalManager: TerminalManager): void {
-  log.info('Tools', `Registering tools (terminal manager pty: ${terminalManager.hasPty})`)
+  log.info('Tools', 'Registering tools')
 
   // --- Active File ---
   server.tool('get_active_file', 'Get the currently active/open file in VS Code', {}, async () => {
@@ -414,7 +414,7 @@ export function registerTools(server: McpServer, bridge: VsCodeBridge, settings:
 
   server.tool(
     'list_terminals',
-    'List all managed terminals and their status (alive/dead, PID, buffer size)',
+    'List all managed terminals and their status (alive/dead, log size)',
     {},
     logged('list_terminals', async () => {
       const terminals = terminalManager.list()
@@ -442,9 +442,10 @@ export function registerTools(server: McpServer, bridge: VsCodeBridge, settings:
     {
       id: z.string().describe('Terminal ID'),
       input: z.string().describe('Text to send to the terminal stdin'),
+      addNewline: z.boolean().optional().default(true).describe('Append a newline after the input (default: true). Set to false for interactive prompts where the process reads the input directly.'),
     },
-    logged('write_terminal', async ({ id, input }) => {
-      const ok = terminalManager.write(id, input)
+    logged('write_terminal', async ({ id, input, addNewline }) => {
+      const ok = terminalManager.write(id, input, addNewline)
       if (!ok) throw new Error(`Terminal '${id}' not found or not alive`)
       return { content: [{ type: 'text', text: JSON.stringify({ sent: true }) }] }
     })
@@ -455,10 +456,9 @@ export function registerTools(server: McpServer, bridge: VsCodeBridge, settings:
     'Kill a managed terminal and its process',
     {
       id: z.string().describe('Terminal ID'),
-      signal: z.enum(['SIGTERM', 'SIGKILL', 'SIGINT']).optional().default('SIGTERM').describe('Signal to send'),
     },
-    logged('kill_terminal', async ({ id, signal }) => {
-      const ok = terminalManager.kill(id, signal as NodeJS.Signals)
+    logged('kill_terminal', async ({ id }) => {
+      const ok = terminalManager.kill(id)
       if (!ok) throw new Error(`Terminal '${id}' not found`)
       return { content: [{ type: 'text', text: JSON.stringify({ killed: true }) }] }
     })
