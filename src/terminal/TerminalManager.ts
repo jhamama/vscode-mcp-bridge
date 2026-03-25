@@ -76,11 +76,11 @@ export class TerminalManager {
     })
     terminal.show(true)
 
-    // If a command was provided, send it after script initializes
+    // If a command was provided, wait for the shell to be ready before sending
     if (command) {
-      setTimeout(() => {
+      this.waitForReady(logFile, () => {
         terminal.sendText(command, true)
-      }, 500)
+      })
     }
 
     // Listen for terminal close
@@ -192,6 +192,21 @@ export class TerminalManager {
     managed.disposeListener.dispose()
     this.terminals.delete(id)
     return true
+  }
+
+  // Poll the log file until content appears (shell has started), then fire callback
+  private waitForReady(logFile: string, callback: () => void, attempt = 0): void {
+    const maxAttempts = 50 // 50 * 100ms = 5s max wait
+    setTimeout(() => {
+      if (this.getLogSize(logFile) > 0) {
+        callback()
+      } else if (attempt < maxAttempts) {
+        this.waitForReady(logFile, callback, attempt + 1)
+      } else {
+        log.warn('Terminal', `Shell did not become ready after 5s, sending command anyway`)
+        callback()
+      }
+    }, 100)
   }
 
   private getLogSize(logFile: string): number {

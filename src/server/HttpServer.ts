@@ -82,7 +82,7 @@ export class HttpServer {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         status: 'ok',
-        version: '0.2.4',
+        version: '0.2.5',
         connectedAgents: this.sessions.size,
         port: this.actualPort,
       }))
@@ -116,7 +116,7 @@ export class HttpServer {
 
     // Create a new McpServer per connection (SDK design requires this)
     const mcpServer = new McpServer(
-      { name: 'vscode-mcp-bridge', version: '0.2.4' },
+      { name: 'vscode-mcp-bridge', version: '0.2.5' },
       {
         instructions: `You are connected to a live VS Code instance. The following suggestions can help you get the most out of these tools:
 

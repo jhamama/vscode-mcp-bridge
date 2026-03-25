@@ -2,7 +2,7 @@
   "name": "vscode-mcp-bridge-ext",
   "displayName": "VS Code MCP Bridge",
   "description": "Bridges VS Code IDE features to AI coding agents via MCP",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "publisher": "jhamama",
   "private": true,
   "engines": {
