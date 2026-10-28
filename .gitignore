@@ -1,5 +1,6 @@
 node_modules/
 out/
+test/.build/
 *.vsix
 *.js.map
 .mcp.json

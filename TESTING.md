@@ -8,6 +8,21 @@
 
 ---
 
+## Automated authorization tests (local, unreleased #90)
+
+This checkout carries an **unreleased local fix** for command authorization (issue #90). The deployed 0.2.5 extension does not include it. These checks run offline and never contact a real VS Code window or the `:3333` server.
+
+```bash
+npm run test:unit           # node:test — registered MCP tools over InMemoryTransport
+npm run smoke:authorization # named MCP smoke — prints observed effects as JSON
+```
+
+Only the external `vscode` module is faked (`test/vscode-mock.ts`); `VsCodeBridge`, `Settings`, and the registered tool handlers are real. Smoke output is fixture evidence, not proof against a real installed VS Code.
+
+Expected: 12 unit tests pass; the smoke prints `"ok": true` with five cases (deny direct with an empty allowlist, allow direct, deny action command, edit-only action, denied combined action).
+
+---
+
 ## Step 1: Run the Extension in Dev Mode
 
 1. Open this folder in VS Code:

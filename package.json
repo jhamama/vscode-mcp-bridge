@@ -52,7 +52,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "VS Code commands allowed via execute_vscode_command tool (empty = none allowed)"
+          "description": "VS Code commands allowed via execute_vscode_command and by apply_code_action (empty = none allowed)"
         },
         "mcpServer.terminalStrategy": {
           "type": "string",
@@ -94,6 +94,8 @@
     "build:prod": "node esbuild.config.js --production",
     "watch": "node esbuild.config.js --watch",
     "typecheck": "tsc --noEmit",
+    "test:unit": "node test/esbuild.test.config.mjs && node --test test/.build/command-authorization.test.mjs",
+    "smoke:authorization": "node test/esbuild.test.config.mjs && node test/.build/smoke-authorization.mjs",
     "package": "vsce package"
   },
   "dependencies": {

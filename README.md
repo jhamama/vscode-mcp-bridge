@@ -79,7 +79,7 @@ The status bar item (bottom right) shows the current port and connected agent co
 | `get_document_symbols` | All symbols (functions, classes, etc.) in a file |
 | `search_workspace_symbols` | Search symbols across the entire workspace |
 | `get_code_actions` | Available quick fixes and refactors for a range |
-| `apply_code_action` | Apply a code action by index |
+| `apply_code_action` | Apply a code action by index (a command carried by the action must be in `mcpServer.allowedCommands`) |
 | `rename_symbol` | Rename a symbol and all references workspace-wide |
 
 ### Terminal
@@ -104,7 +104,7 @@ The status bar item (bottom right) shows the current port and connected agent co
 | `mcpServer.port` | `3333` | HTTP port for the MCP server |
 | `mcpServer.enableContextPush` | `true` | Push active file/selection/diagnostic events to agents automatically |
 | `mcpServer.authToken` | `""` | Bearer token for HTTP auth (empty = no auth) |
-| `mcpServer.allowedCommands` | `[]` | VS Code command IDs allowed via `execute_vscode_command` |
+| `mcpServer.allowedCommands` | `[]` | VS Code command IDs allowed via `execute_vscode_command` and for commands carried by `apply_code_action` (empty = no commands) |
 | `mcpServer.terminalStrategy` | `"childProcess"` | `childProcess` captures output reliably; `shellIntegration` shows in the VS Code terminal panel |
 
 ## Agent Behaviour
@@ -155,3 +155,7 @@ Events arrive as MCP `notifications/message` log messages with `data.type` set t
 ## Security
 
 The server only listens on `127.0.0.1` (localhost) — it is not reachable from other machines on your network. For shared or remote environments, set `mcpServer.authToken` in VS Code settings to require a bearer token on all connections.
+
+### Command authorization
+
+`mcpServer.allowedCommands` is an allowlist: when it is empty, no command may run. The same check guards both `execute_vscode_command` and any command carried by a code action. `apply_code_action` authorizes a carried command before applying the action's edit, so a denied action produces no execution and no partial edit. Edit-only code actions do not need an allowlist entry. When an action carries both an edit and a command, the edit is applied and the command is not executed (the existing precedence).

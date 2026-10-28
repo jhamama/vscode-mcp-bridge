@@ -340,17 +340,10 @@ export function registerTools(server: McpServer, bridge: VsCodeBridge, settings:
       const action = (actions ?? [])[actionIndex]
       if (!action) throw new Error(`No code action at index ${actionIndex}`)
 
-      let applied = false
-      if ('edit' in action && action.edit) {
-        await import('vscode').then(vscode => vscode.workspace.applyEdit(action.edit!))
-        applied = true
-      } else if ('command' in action && action.command) {
-        const cmd = typeof action.command === 'string' ? action.command : action.command.command
-        await import('vscode').then(vscode => vscode.commands.executeCommand(cmd))
-        applied = true
-      }
+      const allowedCommands = settings.get<Array<string>>('allowedCommands') ?? []
+      const result = await bridge.applyCodeAction(action, allowedCommands)
 
-      return { content: [{ type: 'text', text: JSON.stringify({ applied, title: 'title' in action ? action.title : '' }) }] }
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     }
   )
 

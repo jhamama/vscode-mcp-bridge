@@ -406,10 +406,40 @@ export class VsCodeBridge {
 
   // --- Execute VS Code Command ---
 
-  async executeCommand(command: string, args: Array<unknown> = [], allowedCommands: Array<string> = []): Promise<unknown> {
-    if (allowedCommands.length > 0 && !allowedCommands.includes(command)) {
+  private assertCommandAllowed(command: string, allowedCommands: Array<string>): void {
+    if (!allowedCommands.includes(command)) {
       throw new Error(`Command '${command}' is not in the allowed commands list`)
     }
+  }
+
+  async executeCommand(command: string, args: Array<unknown> = [], allowedCommands: Array<string> = []): Promise<unknown> {
+    this.assertCommandAllowed(command, allowedCommands)
     return vscode.commands.executeCommand(command, ...args)
+  }
+
+  async applyCodeAction(action: vscode.Command | vscode.CodeAction, allowedCommands: Array<string>): Promise<{ applied: boolean; title: string }> {
+    const carriedCommand: string | vscode.Command | undefined = 'command' in action ? action.command : undefined
+    const commandId = typeof carriedCommand === 'string' ? carriedCommand : carriedCommand?.command
+
+    // Authorize before any edit is applied so a denied action has no partial side effects.
+    if (commandId !== undefined) {
+      this.assertCommandAllowed(commandId, allowedCommands)
+    }
+
+    // Existing precedence: an action's edit wins; a command carried alongside an edit is not executed.
+    if ('edit' in action && action.edit) {
+      await vscode.workspace.applyEdit(action.edit)
+      return { applied: true, title: action.title }
+    }
+
+    if (commandId !== undefined) {
+      const args = typeof carriedCommand === 'string'
+        ? ('arguments' in action ? action.arguments : undefined)
+        : carriedCommand?.arguments
+      await vscode.commands.executeCommand(commandId, ...(args ?? []))
+      return { applied: true, title: action.title }
+    }
+
+    return { applied: false, title: action.title }
   }
 }
